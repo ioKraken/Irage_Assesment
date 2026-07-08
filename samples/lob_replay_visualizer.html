@@ -170,7 +170,7 @@ function parseCsv(text, name) {
   for (let i = 1; i < lines.length; i++) {
     const f = lines[i].split(",");
     if (f.length !== 26) continue;                 // reject, like the replay engine
-    const n = f.map(Number);
+    const n = f.map((val, idx) => (idx === 4 || idx === 5) ? 0 : Number(val));
     if (n.some(Number.isNaN)) continue;
     out.push({
       tsec: n[0], tnsec: n[1], seq: n[2], id: n[3], type: f[4], side: f[5],
