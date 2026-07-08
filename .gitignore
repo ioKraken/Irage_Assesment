@@ -11,3 +11,5 @@ asan_out/
 # CSVs are build artifacts, except the committed samples
 *.csv
 !samples/*.csv
+.DS_Store
+*.pdf
