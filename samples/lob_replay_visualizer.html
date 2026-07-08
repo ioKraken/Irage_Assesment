@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Binance LOB Replay — binance-lob-capture</title>
+<style>
+  :root{
+    --bg:#0a0f1a; --panel:#101725; --panel2:#0d1320; --line:#1d2942;
+    --text:#e6edf7; --muted:#7b8aa5; --faint:#4a5878;
+    --bid:#3fde8c; --bid-dim:rgba(63,222,140,.14);
+    --ask:#ff6b6b; --ask-dim:rgba(255,107,107,.14);
+    --amber:#ffc24b; --amber-dim:rgba(255,194,75,.12);
+    --mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;display:flex;flex-direction:column}
+  .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+  /* header */
+  header{display:flex;align-items:center;gap:14px;padding:14px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .brand{display:flex;flex-direction:column}
+  .brand b{font-size:15px;letter-spacing:.04em}
+  .brand span{font-size:11px;color:var(--muted);letter-spacing:.14em;text-transform:uppercase}
+  .spacer{flex:1}
+  .btn{background:var(--panel);border:1px solid var(--line);color:var(--text);padding:8px 14px;border-radius:8px;font-size:13px;cursor:pointer;transition:border-color .15s}
+  .btn:hover{border-color:var(--muted)}
+  .btn:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+  .btn.primary{border-color:var(--amber);color:var(--amber)}
+  #fileInput{display:none}
+  .filetag{font-size:12px;color:var(--muted);font-family:var(--mono);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  /* drop overlay */
+  #dropzone{position:fixed;inset:0;background:rgba(10,15,26,.92);display:none;align-items:center;justify-content:center;z-index:50;border:2px dashed var(--amber);font-size:18px;color:var(--amber);letter-spacing:.06em}
+  body.dragging #dropzone{display:flex}
+
+  /* main grid */
+  main{flex:1;display:grid;grid-template-columns:minmax(420px,1.2fr) minmax(300px,.8fr);gap:16px;padding:16px 20px;max-width:1180px;width:100%;margin:0 auto}
+  @media(max-width:820px){main{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .panel h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);padding:12px 16px;border-bottom:1px solid var(--line);font-weight:600;display:flex;justify-content:space-between;align-items:center}
+
+  /* ladder */
+  .ladder{padding:10px 12px 14px}
+  .lrow{display:grid;grid-template-columns:110px 1fr 110px;gap:10px;align-items:center;padding:5px 6px;border-radius:6px;position:relative;font-size:14px}
+  .lrow .price{text-align:right}
+  .lrow .size{text-align:left;color:var(--muted)}
+  .lrow.ask .price{color:var(--ask)}
+  .lrow.bid .price{color:var(--bid)}
+  .bar{height:16px;border-radius:3px;justify-self:start;min-width:0;transition:width .18s ease}
+  .ask .bar{background:var(--ask-dim);border-right:2px solid var(--ask);justify-self:end}
+  .bid .bar{background:var(--bid-dim);border-right:2px solid var(--bid)}
+  .lrow.flash{animation:flash .5s ease}
+  @keyframes flash{0%{background:var(--amber-dim)}100%{background:transparent}}
+  .lrow.empty .price,.lrow.empty .size{color:var(--faint)}
+
+  /* spread band — the signature */
+  .spreadband{display:flex;align-items:baseline;justify-content:center;gap:14px;margin:8px 4px;padding:10px 12px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:linear-gradient(90deg,transparent,var(--amber-dim),transparent)}
+  .spreadband .val{font-size:26px;color:var(--amber);font-weight:600}
+  .spreadband .lbl{font-size:10px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase}
+  .spreadband .bps{font-size:13px;color:var(--muted)}
+
+  /* metrics */
+  .metrics{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line)}
+  .metric{background:var(--panel);padding:12px 16px}
+  .metric .k{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  .metric .v{font-size:17px;margin-top:3px}
+  .metric .v.bid{color:var(--bid)} .metric .v.ask{color:var(--ask)} .metric .v.amber{color:var(--amber)}
+
+  /* event tape */
+  .tape{height:300px;overflow-y:auto;font-family:var(--mono);font-size:12px}
+  .trow{display:grid;grid-template-columns:52px 34px 34px 1fr;gap:8px;padding:5px 14px;border-bottom:1px solid var(--panel2);color:var(--muted)}
+  .trow.current{background:var(--amber-dim);color:var(--text)}
+  .chip{display:inline-block;text-align:center;border-radius:4px;padding:0 5px;font-size:11px;line-height:18px}
+  .chip.D{background:rgba(123,138,165,.18);color:var(--text)} .chip.P{background:var(--amber-dim);color:var(--amber)}
+  .chip.B{background:var(--bid-dim);color:var(--bid)} .chip.S{background:var(--ask-dim);color:var(--ask)} .chip.N{color:var(--faint)}
+
+  /* transport */
+  footer{border-top:1px solid var(--line);background:var(--panel2);padding:12px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;position:sticky;bottom:0}
+  .tbtn{width:38px;height:34px;background:var(--panel);border:1px solid var(--line);border-radius:8px;color:var(--text);font-size:15px;cursor:pointer}
+  .tbtn:hover{border-color:var(--muted)}
+  .tbtn:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+  #scrub{flex:1;min-width:160px;accent-color:var(--amber)}
+  select{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:13px}
+  .pos{font-family:var(--mono);font-size:12px;color:var(--muted);min-width:120px;text-align:right}
+  .hint{padding:6px 20px 12px;font-size:11px;color:var(--faint);text-align:center}
+  @media(prefers-reduced-motion:reduce){.bar{transition:none}.lrow.flash{animation:none}}
+</style>
+</head>
+<body>
+<div id="dropzone">Drop your *_orderbook.csv here</div>
+
+<header>
+  <div class="brand"><b>Binance LOB Replay</b><span>binance-lob-capture · deliverable B viewer</span></div>
+  <div class="spacer"></div>
+  <span class="filetag" id="fileTag">no file — demo tape loaded</span>
+  <button class="btn primary" id="loadBtn">Load orderbook CSV</button>
+  <button class="btn" id="demoBtn">Synthetic demo tape</button>
+  <input type="file" id="fileInput" accept=".csv,text/csv">
+</header>
+
+<main>
+  <section class="panel">
+    <h2>Order book · top 5 <span class="num" id="tsLabel">—</span></h2>
+    <div class="ladder" id="ladder"></div>
+  </section>
+
+  <div style="display:flex;flex-direction:column;gap:16px">
+    <section class="panel">
+      <h2>State</h2>
+      <div class="metrics">
+        <div class="metric"><div class="k">Best bid</div><div class="v bid num" id="mBid">—</div></div>
+        <div class="metric"><div class="k">Best ask</div><div class="v ask num" id="mAsk">—</div></div>
+        <div class="metric"><div class="k">Mid</div><div class="v num" id="mMid">—</div></div>
+        <div class="metric"><div class="k">Spread</div><div class="v amber num" id="mSpr">—</div></div>
+        <div class="metric"><div class="k">Event</div><div class="v num" id="mEvt">—</div></div>
+        <div class="metric"><div class="k">Rows · D · P</div><div class="v num" id="mCnt">—</div></div>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>Event tape <span style="letter-spacing:0;text-transform:none">seqNo · type · side · time</span></h2>
+      <div class="tape" id="tape"></div>
+    </section>
+  </div>
+</main>
+
+<footer>
+  <button class="tbtn" id="stepBack" title="step back (←)">⏮</button>
+  <button class="tbtn" id="playBtn" title="play/pause (space)">▶</button>
+  <button class="tbtn" id="stepFwd" title="step forward (→)">⏭</button>
+  <select id="speed" title="playback speed">
+    <option value="1">1× (event time)</option>
+    <option value="10" selected>10×</option>
+    <option value="60">60×</option>
+    <option value="0">max</option>
+  </select>
+  <input type="range" id="scrub" min="0" max="0" value="0">
+  <span class="pos num" id="posLabel">0 / 0</span>
+</footer>
+<div class="hint">space = play/pause · ←/→ = step · drag &amp; drop any *_orderbook.csv produced by binance_capture (26-column schema, prices scaled 10⁻⁸)</div>
+
+<script>
+"use strict";
+const SCALE = 1e8;
+const HEADER = "tsec,tnsec,seqNo,id,type,side,bid0,bid1,bid2,bid3,bid4,bid_size0,bid_size1,bid_size2,bid_size3,bid_size4,ask0,ask1,ask2,ask3,ask4,ask_size0,ask_size1,ask_size2,ask_size3,ask_size4";
+
+let rows = [];        // parsed events
+let idx = -1;         // current event index
+let playing = false;
+let timer = null;
+
+const $ = id => document.getElementById(id);
+const fmtP = v => v === 0 ? "—" : (v / SCALE).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const fmtS = v => v === 0 ? "" : (v / SCALE).toLocaleString("en-US", {maximumFractionDigits: 5});
+const fmtT = r => {
+  const d = new Date(r.tsec * 1000);
+  const ms = String(Math.floor(r.tnsec / 1e6)).padStart(3, "0");
+  return d.toISOString().substr(11, 8) + "." + ms;
+};
+
+/* ---------- parsing (mirrors replay_engine.cpp validation) ---------- */
+function parseCsv(text, name) {
+  const lines = text.split(/\r?\n/).filter(l => l.length);
+  if (!lines.length || lines[0].trim() !== HEADER) {
+    alert("Header mismatch — this doesn't look like a *_orderbook.csv from binance_capture.\nExpected exact 26-column schema header.");
+    return;
+  }
+  const out = [];
+  for (let i = 1; i < lines.length; i++) {
+    const f = lines[i].split(",");
+    if (f.length !== 26) continue;                 // reject, like the replay engine
+    const n = f.map(Number);
+    if (n.some(Number.isNaN)) continue;
+    out.push({
+      tsec: n[0], tnsec: n[1], seq: n[2], id: n[3], type: f[4], side: f[5],
+      bidP: n.slice(6, 11),  bidS: n.slice(11, 16),
+      askP: n.slice(16, 21), askS: n.slice(21, 26),
+    });
+  }
+  if (!out.length) { alert("No valid data rows found."); return; }
+  rows = out; idx = -1;
+  $("fileTag").textContent = name + " · " + rows.length + " rows";
+  $("scrub").max = rows.length - 1;
+  buildTape();
+  goTo(0);
+}
+
+/* ---------- rendering ---------- */
+function buildLadder() {
+  const L = $("ladder"); L.innerHTML = "";
+  for (let i = 4; i >= 0; i--) L.appendChild(mkRow("ask", i));   // ask4 .. ask0 (best ask spread se sata hua)
+  const sb = document.createElement("div");
+  sb.className = "spreadband";
+  sb.innerHTML = '<span class="lbl">spread</span><span class="val num" id="sbVal">—</span><span class="bps num" id="sbBps"></span>';
+  L.appendChild(sb);
+  for (let i = 0; i <= 4; i++) L.appendChild(mkRow("bid", i));   // bid0 (best) .. bid4
+}
+function mkRow(side, lvl) {
+  const r = document.createElement("div");
+  r.className = "lrow " + side; r.id = side + lvl;
+  r.innerHTML = side === "ask"
+    ? '<span class="size num"></span><span class="bar"></span><span class="price num"></span>'
+    : '<span class="size num"></span><span class="bar"></span><span class="price num"></span>';
+  // bids: price left-of-bar visually? keep symmetric: price right col for both, size left col.
+  return r;
+}
+let prev = null;
+function render(r) {
+  const maxSz = Math.max(1, ...r.bidS, ...r.askS);
+  for (let i = 0; i < 5; i++) {
+    paint($("ask" + i), r.askP[i], r.askS[i], maxSz, prev && (prev.askP[i] !== r.askP[i] || prev.askS[i] !== r.askS[i]));
+    paint($("bid" + i), r.bidP[i], r.bidS[i], maxSz, prev && (prev.bidP[i] !== r.bidP[i] || prev.bidS[i] !== r.bidS[i]));
+  }
+  const bb = r.bidP[0], ba = r.askP[0];
+  $("mBid").textContent = fmtP(bb); $("mAsk").textContent = fmtP(ba);
+  if (bb && ba) {
+    const spr = ba - bb, mid = (ba + bb) / 2;
+    $("mMid").textContent = fmtP(mid);
+    $("mSpr").textContent = fmtP(spr);
+    $("sbVal").textContent = fmtP(spr);
+    $("sbBps").textContent = (spr / mid * 1e4).toFixed(2) + " bps";
+  } else {
+    $("mMid").textContent = $("mSpr").textContent = $("sbVal").textContent = "—";
+    $("sbBps").textContent = "book converging…";
+  }
+  $("mEvt").innerHTML = '<span class="chip ' + r.type + '">' + (r.type === "D" ? "D depth_diff" : "P depth5") + '</span> <span class="chip ' + r.side + '">' + r.side + '</span>';
+  const d = rows.filter(x => x.type === "D").length, p = rows.length - d;
+  $("mCnt").textContent = rows.length + " · " + d + " · " + p;
+  $("tsLabel").textContent = fmtT(r) + " UTC · seq " + r.seq;
+  prev = r;
+}
+function paint(el, price, size, maxSz, changed) {
+  el.classList.toggle("empty", price === 0);
+  el.querySelector(".price").textContent = fmtP(price);
+  el.querySelector(".size").textContent = fmtS(size);
+  el.querySelector(".bar").style.width = price === 0 ? "0" : Math.max(2, size / maxSz * 100) + "%";
+  if (changed) { el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); }
+}
+
+/* ---------- event tape ---------- */
+function buildTape() {
+  const T = $("tape"); T.innerHTML = "";
+  rows.forEach((r, i) => {
+    const d = document.createElement("div");
+    d.className = "trow"; d.id = "t" + i;
+    d.innerHTML = '<span>' + r.seq + '</span><span class="chip ' + r.type + '">' + r.type + '</span><span class="chip ' + r.side + '">' + r.side + '</span><span>' + fmtT(r) + '</span>';
+    d.onclick = () => { pause(); goTo(i); };
+    T.appendChild(d);
+  });
+}
+
+/* ---------- playback ---------- */
+function goTo(i) {
+  if (!rows.length) return;
+  i = Math.max(0, Math.min(rows.length - 1, i));
+  if (idx >= 0) { const o = $("t" + idx); if (o) o.classList.remove("current"); }
+  idx = i;
+  render(rows[idx]);
+  const c = $("t" + idx);
+  if (c) { c.classList.add("current"); c.scrollIntoView({block: "nearest"}); }
+  $("scrub").value = idx;
+  $("posLabel").textContent = (idx + 1) + " / " + rows.length;
+}
+function tick() {
+  if (idx >= rows.length - 1) { pause(); return; }
+  goTo(idx + 1);
+  const sp = Number($("speed").value);
+  let delay = 25;
+  if (sp > 0 && idx < rows.length - 1) {
+    const dt = (rows[idx + 1].tsec - rows[idx].tsec) * 1000 + (rows[idx + 1].tnsec - rows[idx].tnsec) / 1e6;
+    delay = Math.min(2000, Math.max(8, dt / sp));
+  }
+  timer = setTimeout(tick, delay);
+}
+function play() { if (!rows.length) return; if (idx >= rows.length - 1) goTo(0); playing = true; $("playBtn").textContent = "⏸"; tick(); }
+function pause() { playing = false; $("playBtn").textContent = "▶"; clearTimeout(timer); }
+
+/* ---------- demo tapes ---------- */
+const SAMPLE = `tsec,tnsec,seqNo,id,type,side,bid0,bid1,bid2,bid3,bid4,bid_size0,bid_size1,bid_size2,bid_size3,bid_size4,ask0,ask1,ask2,ask3,ask4,ask_size0,ask_size1,ask_size2,ask_size3,ask_size4
+1750000000,100000000,0,0,P,N,2500000000000,2499950000000,0,0,0,100000000,200000000,0,0,0,2500050000000,2500100000000,0,0,0,150000000,300000000,0,0,0
+1750000000,200000000,1,0,D,N,2500000000000,2499900000000,0,0,0,120000000,500000000,0,0,0,2500050000000,0,0,0,0,70000000,0,0,0,0
+1750000000,400000000,2,0,D,N,2499900000000,0,0,0,0,500000000,0,0,0,0,2500050000000,2500200000000,0,0,0,70000000,400000000,0,0,0
+1750000000,500000000,3,0,D,N,2400000000000,0,0,0,0,900000000,0,0,0,0,2400100000000,0,0,0,0,800000000,0,0,0,0
+1750000000,600000000,4,0,D,B,2400050000000,2400000000000,0,0,0,100000000,900000000,0,0,0,2400100000000,0,0,0,0,800000000,0,0,0,0`;
+
+function syntheticTape(nEvents = 400) {
+  // random-walk ek plausible BTCUSDT book — sirf demo ke liye (synthetic, capture nahi)
+  const tick = 0.5 * SCALE;
+  let mid = Math.round(67000 * SCALE / tick) * tick;
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const mkSide = (best, dir) => {
+    const P = [], S = [];
+    for (let i = 0; i < 5; i++) {
+      P.push(best + dir * i * tick * (1 + (Math.random() < .25 ? 1 : 0)));
+      S.push(Math.round(rnd(0.05, 4.5) * SCALE));
+    }
+    return [P, S];
+  };
+  const out = [HEADER];
+  let t = 1750000000, tn = 0, seq = 0;
+  for (let e = 0; e < nEvents; e++) {
+    tn += Math.round(rnd(40, 180)) * 1e6;
+    if (tn >= 1e9) { t += Math.floor(tn / 1e9); tn %= 1e9; }
+    if (Math.random() < .35) mid += (Math.random() < .5 ? -1 : 1) * tick;
+    const spread = tick * (Math.random() < .8 ? 1 : 2);
+    const [bP, bS] = mkSide(mid - spread / 2, -1);
+    const [aP, aS] = mkSide(mid + spread / 2, +1);
+    const isP = e % 12 === 0;
+    const side = isP ? "N" : (Math.random() < .4 ? "B" : Math.random() < .66 ? "S" : "N");
+    out.push([t, tn, seq++, 0, isP ? "P" : "D", side, ...bP, ...bS, ...aP, ...aS].join(","));
+  }
+  return out.join("\n");
+}
+
+/* ---------- wiring ---------- */
+buildLadder();
+$("loadBtn").onclick = () => $("fileInput").click();
+$("fileInput").onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  f.text().then(t => { pause(); parseCsv(t, f.name); });
+};
+$("demoBtn").onclick = () => { pause(); parseCsv(syntheticTape(), "synthetic demo (random walk)"); play(); };
+$("playBtn").onclick = () => playing ? pause() : play();
+$("stepFwd").onclick = () => { pause(); goTo(idx + 1); };
+$("stepBack").onclick = () => { pause(); goTo(idx - 1); };
+$("scrub").oninput = e => { pause(); goTo(Number(e.target.value)); };
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT") return;
+  if (e.code === "Space") { e.preventDefault(); playing ? pause() : play(); }
+  if (e.code === "ArrowRight") { pause(); goTo(idx + 1); }
+  if (e.code === "ArrowLeft") { pause(); goTo(idx - 1); }
+});
+["dragenter","dragover"].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); document.body.classList.add("dragging"); }));
+["dragleave","drop"].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); if (ev === "drop" || e.target === document.body || e.relatedTarget === null) document.body.classList.remove("dragging"); }));
+document.addEventListener("drop", e => {
+  const f = e.dataTransfer.files[0]; if (!f) return;
+  f.text().then(t => { pause(); parseCsv(t, f.name); });
+});
+
+// boot: real sample tape from the repo
+parseCsv(SAMPLE, "samples/…_orderbook.csv (repo sample)");
+</script>
+</body>
+</html>

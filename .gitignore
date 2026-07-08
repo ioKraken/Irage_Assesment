@@ -1,0 +1,13 @@
+build/
+build-*/
+output/
+replay_*/
+sim_*/
+asan_out/
+*.o
+*.a
+*.so
+.env
+# CSVs are build artifacts, except the committed samples
+*.csv
+!samples/*.csv
