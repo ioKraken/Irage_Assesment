@@ -161,9 +161,16 @@ const fmtT = r => {
 
 /* ---------- parsing (mirrors replay_engine.cpp validation) ---------- */
 function parseCsv(text, name) {
+  text = text.replace(/^\uFEFF/, ""); // strip BOM if present
   const lines = text.split(/\r?\n/).filter(l => l.length);
-  if (!lines.length || lines[0].trim() !== HEADER) {
-    alert("Header mismatch — this doesn't look like a *_orderbook.csv from binance_capture.\nExpected exact 26-column schema header.");
+  if (!lines.length) return;
+  const h = lines[0].trim();
+  if (h.startsWith("recv_tsec") || h.includes("payload_json")) {
+    alert("You selected the raw Market Data file (" + name + ").\n\nPlease select the Orderbook Snapshot file ending in '_orderbook.csv' instead!");
+    return;
+  }
+  if (!h.startsWith("tsec,tnsec") && h.split(",").length !== 26) {
+    alert("Header mismatch — this doesn't look like a *_orderbook.csv file.\nExpected 26-column schema starting with: tsec,tnsec,seqNo,id,type,side...");
     return;
   }
   const out = [];
